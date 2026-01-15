@@ -60,27 +60,84 @@ export default function Home() {
         try {
             let fileToUpload: File | Blob = file;
 
-            // Optional compression to save bandwidth
-            setIsCompressing(true);
-            try {
-                const compressed = await compressAudio(file);
-                if (compressed.size < file.size) {
-                    fileToUpload = compressed;
+            // Only compress if it's a large WAV or unknown type. 
+            // MP3/M4A/AAC are already compressed, so we bypass to keep quality.
+            const isAlreadyCompressed = file.type.includes('mpeg') || file.type.includes('mp4') || file.type.includes('m4a') || file.type.includes('aac');
+
+            if (!isAlreadyCompressed && file.size > 2 * 1024 * 1024) {
+                setIsCompressing(true);
+                try {
+                    const compressed = await compressAudio(file);
+                    if (compressed.size < file.size) {
+                        fileToUpload = compressed;
+                    }
+                } catch (compErr: any) {
+                    console.error("Compression skipped/failed:", compErr);
+                } finally {
+                    setIsCompressing(false);
                 }
-            } catch (compErr: any) {
-                console.error("Compression skipped/failed:", compErr);
-            } finally {
-                setIsCompressing(false);
+            } else {
+                console.log(`Bypassing compression for ${file.type} (Size: ${(file.size / 1024 / 1024).toFixed(2)}MB)`);
             }
 
-            const formData = new FormData();
-            formData.append("file", fileToUpload);
+            const CHUNK_SIZE = 4 * 1024 * 1024; // 4MB to be safe for Vercel
 
-            const response = await fetch("/api/analyze", {
-                method: "POST",
-                body: formData,
-            });
+            let response: Response;
 
+            if (fileToUpload.size > CHUNK_SIZE) {
+                console.log("File > 4MB, starting chunked upload...");
+                const chunks: { fileUri: string; mimeType: string }[] = [];
+                const totalChunks = Math.ceil(fileToUpload.size / CHUNK_SIZE);
+
+                for (let i = 0; i < totalChunks; i++) {
+                    const start = i * CHUNK_SIZE;
+                    const end = Math.min(start + CHUNK_SIZE, fileToUpload.size);
+                    const chunk = fileToUpload.slice(start, end);
+
+                    const chunkFormData = new FormData();
+                    chunkFormData.append("chunk", chunk, `chunk_${i}.wav`);
+                    chunkFormData.append("fileName", (fileToUpload as File).name || "audio.wav");
+                    chunkFormData.append("mimeType", fileToUpload.type || "audio/wav");
+
+                    console.log(`Uploading chunk ${i + 1}/${totalChunks}...`);
+                    const chunkRes = await fetch("/api/upload/chunk", {
+                        method: "POST",
+                        body: chunkFormData,
+                    });
+
+                    if (!chunkRes.ok) {
+                        const err = await chunkRes.json();
+                        throw new Error(`Chunk ${i + 1} upload failed: ${err.error}`);
+                    }
+
+                    const chunkData = await chunkRes.json();
+                    chunks.push({
+                        fileUri: chunkData.fileUri,
+                        mimeType: chunkData.mimeType
+                    });
+                }
+
+                console.log("All chunks uploaded. Starting final analysis...");
+                const analyzeFormData = new FormData();
+                analyzeFormData.append("chunks", JSON.stringify(chunks));
+
+                response = await fetch("/api/analyze", {
+                    method: "POST",
+                    body: analyzeFormData,
+                });
+
+            } else {
+                // Standard upload for small files
+                const formData = new FormData();
+                formData.append("file", fileToUpload);
+
+                response = await fetch("/api/analyze", {
+                    method: "POST",
+                    body: formData,
+                });
+            }
+
+            // Common Response Handling
             const contentType = response.headers.get("content-type");
             if (contentType && contentType.includes("application/json")) {
                 const data = await response.json();
@@ -90,7 +147,12 @@ export default function Home() {
                 setReports(data);
             } else {
                 const text = await response.text();
-                throw new Error("서버 응답 오류가 발생했습니다. Render 배포 사양에 따라 대용량 처리가 가능하지만, 네트워크 환경을 확인해 주세요.");
+                console.error("Server Response Error:", text);
+                // Handle the "An error occurred" text more specifically
+                if (text.includes("An error occurred") || text.includes("INTERNAL_SERVER_ERROR")) {
+                    throw new Error("서버 내부 오류가 발생했습니다. 파일 크기를 줄이거나 잠시 후 다시 시도해 주세요.");
+                }
+                throw new Error(text.substring(0, 100) || "서버 응답 오류가 발생했습니다.");
             }
         } catch (err: any) {
             console.error(err);
@@ -203,22 +265,41 @@ export default function Home() {
         setIsExporting("pdf");
 
         try {
-            const canvas = await html2canvas(reportRef.current, {
+            console.log("Starting PDF export...");
+            const element = reportRef.current;
+
+            const canvas = await html2canvas(element, {
                 scale: 2,
                 useCORS: true,
-                backgroundColor: "#050505"
+                backgroundColor: "#050505",
+                logging: false,
+                ignoreElements: (el) => el.classList.contains("no-export")
             });
 
             const imgData = canvas.toDataURL("image/png");
-            const pdf = new jsPDF("p", "mm", "a4");
-            const imgProps = pdf.getImageProperties(imgData);
+
+            // Adjust PDF dimensions to match canvas aspect ratio
+            const pdf = new jsPDF({
+                orientation: "portrait",
+                unit: "px",
+                format: [canvas.width / 2, canvas.height / 2] // Scale back to 1x for PDF internal sizing
+            });
+
             const pdfWidth = pdf.internal.pageSize.getWidth();
-            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+            const pdfHeight = pdf.internal.pageSize.getHeight();
 
             pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
-            pdf.save(`STEK_Minutes_${reports[viewLang].title.replace(/\s+/g, "_")}.pdf`);
-        } catch (err) {
+
+            // Sanitize filename: remove non-alphanumeric/korean characters
+            const safeTitle = reports[viewLang].title.replace(/[^\uAC00-\uD7A3a-zA-Z0-9\s]/g, "").replace(/\s+/g, "_") || "Meeting_Record";
+            pdf.save(`STEK_Minutes_${safeTitle}.pdf`);
+
+            console.log("PDF export successful");
+        } catch (err: any) {
             console.error("PDF Export failed", err);
+            alert(viewLang === 'ko'
+                ? `PDF 저장 중 오류가 발생했습니다: ${err.message || '알 수 없는 오류'}`
+                : `Failed to save PDF: ${err.message || 'Unknown error'}`);
         } finally {
             setIsExporting(null);
         }
