@@ -1,0 +1,13 @@
+services:
+  - type: web
+    name: stek-meeting-minutes
+    env: node
+    buildCommand: npm install && npm run build
+    startCommand: npm run start
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: NODE_OPTIONS
+        value: --dns-result-order=ipv4first
