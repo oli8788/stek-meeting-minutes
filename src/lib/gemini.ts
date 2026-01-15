@@ -14,7 +14,7 @@ export function getModel() {
 
   const genAI = new GoogleGenerativeAI(apiKey);
   return genAI.getGenerativeModel({
-    model: "gemini-1.5-flash",
+    model: "gemini-flash-latest",
     systemInstruction: `당신은 STEK(에스텍)의 프리미엄 회의록 작성 전문가입니다. 
  입력되는 오디오 내용을 분석하여 **한국어(ko)와 영어(en) 두 가지 버전의 회의록을 동시에** 생성해야 합니다.
 
