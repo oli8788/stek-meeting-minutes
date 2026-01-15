@@ -1,5 +1,0 @@
-{
-  "message": "genAI.listModels is not a function",
-  "stack": "TypeError: genAI.listModels is not a function\n    at diagnostic (C:\\Users\\박미겔\\.gemini\\antigravity\\scratch\\stek-meeting-minutes\\diagnostic.js:10:36)\n    at Object.<anonymous> (C:\\Users\\박미겔\\.gemini\\antigravity\\scratch\\stek-meeting-minutes\\diagnostic.js:26:1)\n    at Module._compile (node:internal/modules/cjs/loader:1706:14)\n    at Object..js (node:internal/modules/cjs/loader:1839:10)\n    at Module.load (node:internal/modules/cjs/loader:1441:32)\n    at Function._load (node:internal/modules/cjs/loader:1263:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:322:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:237:24)\n    at Function.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:171:5)\n    at node:internal/main/run_main_module:36:49",
-  "name": "TypeError"
-}

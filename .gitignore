@@ -27,3 +27,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+*.js
+!next.config.js
+!postcss.config.js
+*.txt
+*.json
+!package.json
+!package-lock.json
+!tsconfig.json
+!project.json
